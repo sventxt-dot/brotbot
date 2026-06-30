@@ -1,0 +1,29 @@
+{
+  "name": "brotbot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "migrate": "ts-node scripts/migrate.ts",
+    "migrate:dry": "DRY_RUN=1 ts-node scripts/migrate.ts",
+    "db:schema": "echo 'Run the SQL in supabase/schema.sql against your Supabase project'"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@supabase/supabase-js": "^2.49.8",
+    "next": "^15.3.3",
+    "openai": "^4.103.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

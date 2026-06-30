@@ -1,0 +1,32 @@
+# Never copy into the Docker image:
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Raw source data (already migrated into Supabase)
+data/
+
+# Dev artifacts
+node_modules
+.next
+npm-debug.log*
+
+# Old Flowise files (not part of the new app)
+*.log
+logs/
+*.json.bak
+Public/
+
+# Git
+.git
+.gitignore
+
+# Docs / briefings (not needed at runtime)
+*.md
+brotbot_briefing*
+SETUP-ANLEITUNG*
+
+# OS
+.DS_Store

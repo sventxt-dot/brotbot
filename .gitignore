@@ -1,0 +1,54 @@
+# Environment / secrets
+.env
+.env.local
+.env*.local
+
+# Next.js
+.next/
+out/
+
+# Node
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Raw source data (migrated into Supabase; not for public serving)
+data/raw/
+
+# OS
+.DS_Store
+
+# Legacy Flowise files — from the old chatbot setup, not part of the new app.
+# Kept locally for reference but not committed to the new repo.
+BrotBot*.json
+flowise-*.js
+flowise-*.json
+hybrid-search-*.js
+production-rag-proxy.js
+new-rag-engine.js
+rag-engine.log
+auto-setup-flowise.js
+create-flowise-flow.js
+data-restructurer.js
+intent-router.js
+list-flows.js
+test-flowise.js
+test-rag.js
+setup-brotbot2.sh
+start-brotbot-production.sh
+update-flow.json
+web-ui.html
+server.log
+proxy.log
+integration.log
+"JSON RAG"/
+JSON\ RAG/
+
+# Old structured JSON exports (pre-migration artifacts)
+brotideen.structured.json
+faq.structured.json
+filialen.structured.json
+products.structured.json
+SETUP-ANLEITUNG.md
