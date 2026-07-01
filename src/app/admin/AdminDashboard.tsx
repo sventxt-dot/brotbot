@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./admin.module.css";
 import { RETRIEVER_DOMAINS, RETRIEVER_ABBREV, type AdminDocument } from "@/lib/admin";
@@ -18,13 +18,15 @@ interface AnalysisResult {
 
 function formatGermanDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("de-DE", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }) + " Uhr";
+  return (
+    d.toLocaleDateString("de-DE", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }) + " Uhr"
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -40,25 +42,24 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ── Grouping ─────────────────────────────────────────────────────────────────
-// Rows with the same original input + same submission minute are one logical
-// entry (the user selected multiple retrievers in a single submit).
 
 interface DocGroup {
   ids: string[];
-  retriever_domains: string[];   // merged across all rows in the group
+  retriever_domains: string[];
   titel: string;
   inputType: string;
-  original: string;
+  original: string; // created_by_input (freitext text or URL)
   status: string;
+  gueltig_von: string | null;
   gueltig_bis: string | null;
-  created_at: string;            // from the first row in the group
+  created_at: string;
 }
 
 function groupDocs(docs: AdminDocument[]): DocGroup[] {
   const map = new Map<string, DocGroup>();
 
   for (const doc of docs) {
-    const minute = doc.created_at.slice(0, 16); // "2026-07-01T10:34"
+    const minute = doc.created_at.slice(0, 16);
     const key = `${doc.metadata?.created_by_input ?? doc.id}__${minute}`;
 
     const existing = map.get(key);
@@ -75,6 +76,7 @@ function groupDocs(docs: AdminDocument[]): DocGroup[] {
         inputType: doc.metadata?.input_type ?? "freitext",
         original: doc.metadata?.created_by_input ?? "",
         status: doc.status,
+        gueltig_von: doc.gueltig_von,
         gueltig_bis: doc.gueltig_bis,
         created_at: doc.created_at,
       });
@@ -82,6 +84,14 @@ function groupDocs(docs: AdminDocument[]): DocGroup[] {
   }
 
   return Array.from(map.values());
+}
+
+// Helper: delete all rows in a group
+async function deleteGroupRows(ids: string[]): Promise<boolean> {
+  const results = await Promise.all(
+    ids.map((id) => fetch(`/api/admin/documents/${id}`, { method: "DELETE" }))
+  );
+  return results.every((r) => r.ok);
 }
 
 // ── Delete dialog ────────────────────────────────────────────────────────────
@@ -107,11 +117,7 @@ function DeleteDialog({
           <button className={styles.cancelBtn} onClick={onCancel} disabled={loading}>
             Abbrechen
           </button>
-          <button
-            className={styles.confirmDeleteBtn}
-            onClick={onConfirm}
-            disabled={loading}
-          >
+          <button className={styles.confirmDeleteBtn} onClick={onConfirm} disabled={loading}>
             {loading ? "Löschen ..." : "Löschen"}
           </button>
         </div>
@@ -124,9 +130,13 @@ function DeleteDialog({
 
 function SidebarEntry({
   group,
+  isEditing,
+  onEdit,
   onDeleted,
 }: {
   group: DocGroup;
+  isEditing: boolean;
+  onEdit: (group: DocGroup) => void;
   onDeleted: (ids: string[]) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -135,11 +145,8 @@ function SidebarEntry({
 
   async function handleDelete() {
     setDeleting(true);
-    // Delete all rows belonging to this group in parallel.
-    const results = await Promise.all(
-      group.ids.map((id) => fetch(`/api/admin/documents/${id}`, { method: "DELETE" }))
-    );
-    if (results.every((r) => r.ok)) {
+    const ok = await deleteGroupRows(group.ids);
+    if (ok) {
       onDeleted(group.ids);
     } else {
       setDeleting(false);
@@ -149,7 +156,7 @@ function SidebarEntry({
   }
 
   return (
-    <div className={styles.entry}>
+    <div className={styles.entry} style={isEditing ? { background: "#fffde6" } : undefined}>
       {confirmDelete && (
         <DeleteDialog
           onConfirm={handleDelete}
@@ -193,9 +200,14 @@ function SidebarEntry({
 
       {expanded && <div className={styles.originalInput}>{group.original}</div>}
 
-      <button className={styles.deleteBtn} onClick={() => setConfirmDelete(true)}>
-        Löschen
-      </button>
+      <div className={styles.entryActions}>
+        <button className={styles.editBtn} onClick={() => onEdit(group)}>
+          Bearbeiten
+        </button>
+        <button className={styles.deleteBtn} onClick={() => setConfirmDelete(true)}>
+          Löschen
+        </button>
+      </div>
     </div>
   );
 }
@@ -205,10 +217,14 @@ function SidebarEntry({
 function Sidebar({
   docs,
   loading,
+  editingGroup,
+  onEdit,
   onDeleted,
 }: {
   docs: AdminDocument[];
   loading: boolean;
+  editingGroup: DocGroup | null;
+  onEdit: (group: DocGroup) => void;
   onDeleted: (ids: string[]) => void;
 }) {
   const groups = groupDocs(docs);
@@ -232,7 +248,13 @@ function Sidebar({
           <div className={styles.sidebarEmpty}>Noch keine Inhalte hinzugefügt.</div>
         ) : (
           groups.map((group) => (
-            <SidebarEntry key={group.ids[0]} group={group} onDeleted={onDeleted} />
+            <SidebarEntry
+              key={group.ids[0]}
+              group={group}
+              isEditing={editingGroup?.ids[0] === group.ids[0]}
+              onEdit={onEdit}
+              onDeleted={onDeleted}
+            />
           ))
         )}
       </div>
@@ -348,31 +370,65 @@ function ValiditySection({
 
 // ── Freitext tab ─────────────────────────────────────────────────────────────
 
-function FreitextTab({ onSuccess }: { onSuccess: () => void }) {
+function FreitextTab({
+  editingGroup,
+  onCancelEdit,
+  onSuccess,
+  onEditDone,
+}: {
+  editingGroup: DocGroup | null;
+  onCancelEdit: () => void;
+  onSuccess: () => void;
+  onEditDone: (ids: string[]) => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
   const [text, setText] = useState("");
   const [domains, setDomains] = useState<string[]>([]);
   const [limited, setLimited] = useState(false);
-  const today = new Date().toISOString().split("T")[0];
   const [gueltigVon, setGueltigVon] = useState(today);
   const [gueltigBis, setGueltigBis] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
 
+  // Pre-fill when entering edit mode; reset when leaving.
+  useEffect(() => {
+    if (editingGroup) {
+      setText(editingGroup.original);
+      setDomains(editingGroup.retriever_domains);
+      const hasDates = !!editingGroup.gueltig_bis;
+      setLimited(hasDates);
+      setGueltigVon(editingGroup.gueltig_von ?? today);
+      setGueltigBis(editingGroup.gueltig_bis ?? "");
+    } else {
+      setText("");
+      setDomains([]);
+      setLimited(false);
+      setGueltigVon(today);
+      setGueltigBis("");
+    }
+    setSuccess("");
+    setError("");
+  }, [editingGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleSubmit() {
     if (!text.trim()) return;
-    if (domains.length === 0) {
-      setError("Bitte mindestens einen Bereich auswählen.");
-      return;
-    }
-    if (limited && !gueltigBis) {
-      setError("Bitte ein Enddatum angeben.");
-      return;
-    }
+    if (domains.length === 0) { setError("Bitte mindestens einen Bereich auswählen."); return; }
+    if (limited && !gueltigBis) { setError("Bitte ein Enddatum angeben."); return; }
 
     setLoading(true);
     setError("");
     setSuccess("");
+
+    // In edit mode: delete old rows first, then ingest fresh.
+    if (editingGroup) {
+      const deleted = await deleteGroupRows(editingGroup.ids);
+      if (!deleted) {
+        setError("Alte Einträge konnten nicht gelöscht werden.");
+        setLoading(false);
+        return;
+      }
+    }
 
     const res = await fetch("/api/admin/ingest", {
       method: "POST",
@@ -389,18 +445,22 @@ function FreitextTab({ onSuccess }: { onSuccess: () => void }) {
     setLoading(false);
 
     if (data.success) {
-      setSuccess(
-        `${data.inserted} Eintrag${data.inserted !== 1 ? "e" : ""} erfolgreich hinzugefügt.`
-      );
-      setText("");
-      setDomains([]);
-      setLimited(false);
-      setGueltigBis("");
-      onSuccess();
+      if (editingGroup) {
+        onEditDone(editingGroup.ids);
+      } else {
+        setSuccess(`${data.inserted} Eintrag${data.inserted !== 1 ? "e" : ""} erfolgreich hinzugefügt.`);
+        setText("");
+        setDomains([]);
+        setLimited(false);
+        setGueltigBis("");
+        onSuccess();
+      }
     } else {
       setError(data.error ?? "Unbekannter Fehler.");
     }
   }
+
+  const isEditMode = !!editingGroup;
 
   return (
     <div className={styles.formBody}>
@@ -421,9 +481,7 @@ function FreitextTab({ onSuccess }: { onSuccess: () => void }) {
 
       <div className={styles.field}>
         <span className={styles.label}>Zu welchem Bereich gehört diese Information?</span>
-        <div className={styles.hint}>
-          Mehrfachauswahl möglich – wähle alle passenden Bereiche.
-        </div>
+        <div className={styles.hint}>Mehrfachauswahl möglich – wähle alle passenden Bereiche.</div>
         <RetrieverCheckboxes selected={domains} onChange={setDomains} />
       </div>
 
@@ -444,7 +502,11 @@ function FreitextTab({ onSuccess }: { onSuccess: () => void }) {
         onClick={handleSubmit}
         disabled={loading || !text.trim()}
       >
-        {loading ? "Wird verarbeitet ..." : "Inhalt hinzufügen"}
+        {loading
+          ? "Wird verarbeitet ..."
+          : isEditMode
+          ? "Änderungen speichern"
+          : "Inhalt hinzufügen"}
       </button>
     </div>
   );
@@ -452,26 +514,59 @@ function FreitextTab({ onSuccess }: { onSuccess: () => void }) {
 
 // ── URL tab ───────────────────────────────────────────────────────────────────
 
-function UrlTab({ onSuccess }: { onSuccess: () => void }) {
+function UrlTab({
+  editingGroup,
+  onCancelEdit,
+  onSuccess,
+  onEditDone,
+}: {
+  editingGroup: DocGroup | null;
+  onCancelEdit: () => void;
+  onSuccess: () => void;
+  onEditDone: (ids: string[]) => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
   const [url, setUrl] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzeError, setAnalyzeError] = useState("");
   const [domains, setDomains] = useState<string[]>([]);
   const [limited, setLimited] = useState(false);
-  const today = new Date().toISOString().split("T")[0];
   const [gueltigVon, setGueltigVon] = useState(today);
   const [gueltigBis, setGueltigBis] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState("");
   const [submitError, setSubmitError] = useState("");
 
+  // Pre-fill when entering edit mode; reset when leaving.
+  useEffect(() => {
+    if (editingGroup) {
+      setUrl(editingGroup.original);
+      setDomains(editingGroup.retriever_domains);
+      const hasDates = !!editingGroup.gueltig_bis;
+      setLimited(hasDates);
+      setGueltigVon(editingGroup.gueltig_von ?? today);
+      setGueltigBis(editingGroup.gueltig_bis ?? "");
+      setAnalysis(null);
+      setAnalyzeError("");
+    } else {
+      setUrl("");
+      setDomains([]);
+      setLimited(false);
+      setGueltigVon(today);
+      setGueltigBis("");
+      setAnalysis(null);
+      setAnalyzeError("");
+    }
+    setSuccess("");
+    setSubmitError("");
+  }, [editingGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleAnalyze() {
     if (!url.trim()) return;
     setAnalyzing(true);
     setAnalyzeError("");
     setAnalysis(null);
-    setDomains([]);
 
     const res = await fetch("/api/admin/analyze-url", {
       method: "POST",
@@ -484,7 +579,11 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
 
     if (data.success) {
       setAnalysis(data);
-      setDomains(data.vorgeschlagene_retriever ?? []);
+      // In edit mode keep the user's current retriever selection; only set
+      // from LLM suggestion when starting fresh.
+      if (!editingGroup) {
+        setDomains(data.vorgeschlagene_retriever ?? []);
+      }
     } else {
       setAnalyzeError(
         data.error ??
@@ -495,18 +594,21 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
 
   async function handleSubmit() {
     if (!analysis) return;
-    if (domains.length === 0) {
-      setSubmitError("Bitte mindestens einen Bereich auswählen.");
-      return;
-    }
-    if (limited && !gueltigBis) {
-      setSubmitError("Bitte ein Enddatum angeben.");
-      return;
-    }
+    if (domains.length === 0) { setSubmitError("Bitte mindestens einen Bereich auswählen."); return; }
+    if (limited && !gueltigBis) { setSubmitError("Bitte ein Enddatum angeben."); return; }
 
     setLoading(true);
     setSubmitError("");
     setSuccess("");
+
+    if (editingGroup) {
+      const deleted = await deleteGroupRows(editingGroup.ids);
+      if (!deleted) {
+        setSubmitError("Alte Einträge konnten nicht gelöscht werden.");
+        setLoading(false);
+        return;
+      }
+    }
 
     const res = await fetch("/api/admin/ingest-url", {
       method: "POST",
@@ -524,19 +626,23 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
     setLoading(false);
 
     if (data.success) {
-      setSuccess(
-        `${data.inserted} Eintrag${data.inserted !== 1 ? "e" : ""} erfolgreich hinzugefügt.`
-      );
-      setUrl("");
-      setAnalysis(null);
-      setDomains([]);
-      setLimited(false);
-      setGueltigBis("");
-      onSuccess();
+      if (editingGroup) {
+        onEditDone(editingGroup.ids);
+      } else {
+        setSuccess(`${data.inserted} Eintrag${data.inserted !== 1 ? "e" : ""} erfolgreich hinzugefügt.`);
+        setUrl("");
+        setAnalysis(null);
+        setDomains([]);
+        setLimited(false);
+        setGueltigBis("");
+        onSuccess();
+      }
     } else {
       setSubmitError(data.error ?? "Unbekannter Fehler.");
     }
   }
+
+  const isEditMode = !!editingGroup;
 
   return (
     <div className={styles.formBody}>
@@ -575,17 +681,29 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
 
       {analyzeError && <div className={styles.errorMsg}>{analyzeError}</div>}
 
-      {analysis && (
+      {/* In edit mode, show retrievers + validity even before re-analysis */}
+      {(analysis || isEditMode) && (
         <>
-          <div className={styles.analysisResult}>
-            <div className={styles.analysisTitle}>{analysis.titel}</div>
-            <div className={styles.analysisSummary}>{analysis.zusammenfassung}</div>
-          </div>
+          {analysis && (
+            <div className={styles.analysisResult}>
+              <div className={styles.analysisTitle}>{analysis.titel}</div>
+              <div className={styles.analysisSummary}>{analysis.zusammenfassung}</div>
+            </div>
+          )}
+
+          {isEditMode && !analysis && (
+            <div className={styles.hint} style={{ fontStyle: "italic" }}>
+              Klicke auf „Seite analysieren", um den aktuellen Seiteninhalt neu zu laden.
+              Die Bereichsauswahl bleibt erhalten.
+            </div>
+          )}
 
           <div className={styles.field}>
             <span className={styles.label}>Zu welchem Bereich gehört diese Information?</span>
             <div className={styles.hint}>
-              Der BrotBot hat folgende Bereiche vorgeschlagen. Du kannst die Auswahl anpassen.
+              {analysis && !isEditMode
+                ? "Der BrotBot hat folgende Bereiche vorgeschlagen. Du kannst die Auswahl anpassen."
+                : "Mehrfachauswahl möglich – wähle alle passenden Bereiche."}
             </div>
             <RetrieverCheckboxes selected={domains} onChange={setDomains} />
           </div>
@@ -605,14 +723,20 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
           <button
             className={styles.submitBtn}
             onClick={handleSubmit}
-            disabled={loading || domains.length === 0}
+            disabled={loading || domains.length === 0 || (!analysis && !isEditMode)}
           >
-            {loading ? "Wird verarbeitet ..." : "Inhalt hinzufügen"}
+            {loading
+              ? "Wird verarbeitet ..."
+              : isEditMode
+              ? "Änderungen speichern"
+              : "Inhalt hinzufügen"}
           </button>
         </>
       )}
 
-      {success && !analysis && <div className={styles.successMsg}>{success}</div>}
+      {success && !analysis && !isEditMode && (
+        <div className={styles.successMsg}>{success}</div>
+      )}
     </div>
   );
 }
@@ -624,6 +748,8 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
   const [tab, setTab] = useState<"freitext" | "url">("freitext");
   const [docs, setDocs] = useState<AdminDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
+  const [editingGroup, setEditingGroup] = useState<DocGroup | null>(null);
+  const formPanelRef = useRef<HTMLDivElement>(null);
 
   const fetchDocs = useCallback(async () => {
     setDocsLoading(true);
@@ -635,12 +761,33 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
     setDocsLoading(false);
   }, []);
 
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  // When edit mode starts: switch to the right tab and scroll form into view.
   useEffect(() => {
-    fetchDocs();
-  }, [fetchDocs]);
+    if (editingGroup) {
+      setTab(editingGroup.inputType === "url" ? "url" : "freitext");
+      formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [editingGroup]);
 
   function handleDocDeleted(ids: string[]) {
     setDocs((prev) => prev.filter((d) => !ids.includes(d.id)));
+    // Clear edit mode if the entry being edited was deleted.
+    setEditingGroup((eg) =>
+      eg && eg.ids.some((id) => ids.includes(id)) ? null : eg
+    );
+  }
+
+  function handleEditDone(deletedIds: string[]) {
+    // Remove old rows, clear edit mode, then refresh sidebar to show new rows.
+    setDocs((prev) => prev.filter((d) => !deletedIds.includes(d.id)));
+    setEditingGroup(null);
+    fetchDocs();
+  }
+
+  function handleCancelEdit() {
+    setEditingGroup(null);
   }
 
   async function handleLogout() {
@@ -667,31 +814,64 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
 
       <div className={styles.content}>
         {/* Left: input form */}
-        <div className={styles.formPanel}>
-          <h1 className={styles.formPanelTitle}>Neuen Inhalt hinzufügen</h1>
+        <div className={styles.formPanel} ref={formPanelRef}>
+          <h1 className={styles.formPanelTitle}>
+            {editingGroup ? "Inhalt bearbeiten" : "Neuen Inhalt hinzufügen"}
+          </h1>
+
+          {editingGroup && (
+            <div className={styles.editBanner}>
+              <span className={styles.editBannerLabel}>
+                Bearbeitungsmodus — „{editingGroup.titel}"
+              </span>
+              <button className={styles.cancelLink} onClick={handleCancelEdit}>
+                Abbrechen
+              </button>
+            </div>
+          )}
+
           <div className={styles.tabs}>
             <button
               className={`${styles.tab} ${tab === "freitext" ? styles.tabActive : ""}`}
               onClick={() => setTab("freitext")}
+              disabled={!!editingGroup}
             >
               Freitext
             </button>
             <button
               className={`${styles.tab} ${tab === "url" ? styles.tabActive : ""}`}
               onClick={() => setTab("url")}
+              disabled={!!editingGroup}
             >
               URL
             </button>
           </div>
+
           {tab === "freitext" ? (
-            <FreitextTab onSuccess={fetchDocs} />
+            <FreitextTab
+              editingGroup={editingGroup?.inputType === "freitext" ? editingGroup : null}
+              onCancelEdit={handleCancelEdit}
+              onSuccess={fetchDocs}
+              onEditDone={handleEditDone}
+            />
           ) : (
-            <UrlTab onSuccess={fetchDocs} />
+            <UrlTab
+              editingGroup={editingGroup?.inputType === "url" ? editingGroup : null}
+              onCancelEdit={handleCancelEdit}
+              onSuccess={fetchDocs}
+              onEditDone={handleEditDone}
+            />
           )}
         </div>
 
         {/* Right: activity sidebar */}
-        <Sidebar docs={docs} loading={docsLoading} onDeleted={handleDocDeleted} />
+        <Sidebar
+          docs={docs}
+          loading={docsLoading}
+          editingGroup={editingGroup}
+          onEdit={setEditingGroup}
+          onDeleted={handleDocDeleted}
+        />
       </div>
     </div>
   );
