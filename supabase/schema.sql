@@ -91,7 +91,10 @@ create or replace trigger documents_updated_at
 -- 6. Helper: match_documents (used by the /api/chat RAG pipeline)
 --
 --    Returns top-k documents by cosine similarity, optionally
---    filtered to one or more retriever domains and to status='aktiv'.
+--    filtered to one or more retriever domains.
+--    Includes status='aktiv' and status='geplant' — future events are
+--    visible to the bot so it can answer questions about upcoming dates.
+--    Only status='abgelaufen' (expired) is excluded.
 --    Called from the backend via supabase.rpc('match_documents', …)
 -- ---------------------------------------------------------------
 create or replace function match_documents(
@@ -115,7 +118,7 @@ language sql stable as $$
     1 - (d.embedding <=> query_embedding) as similarity
   from documents d
   where
-    d.status = 'aktiv'
+    d.status in ('aktiv', 'geplant')
     and (
       filter_retrievers is null
       or d.retriever_domain && filter_retrievers  -- array overlap
