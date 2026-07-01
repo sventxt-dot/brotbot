@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./admin.module.css";
 import { RETRIEVER_DOMAINS, RETRIEVER_ABBREV, type AdminDocument } from "@/lib/admin";
@@ -37,6 +37,51 @@ function StatusBadge({ status }: { status: string }) {
   const label =
     status === "aktiv" ? "Aktiv" : status === "geplant" ? "Geplant" : "Abgelaufen";
   return <span className={`${styles.statusBadge} ${cls}`}>{label}</span>;
+}
+
+// ── Grouping ─────────────────────────────────────────────────────────────────
+// Rows with the same original input + same submission minute are one logical
+// entry (the user selected multiple retrievers in a single submit).
+
+interface DocGroup {
+  ids: string[];
+  retriever_domains: string[];   // merged across all rows in the group
+  titel: string;
+  inputType: string;
+  original: string;
+  status: string;
+  gueltig_bis: string | null;
+  created_at: string;            // from the first row in the group
+}
+
+function groupDocs(docs: AdminDocument[]): DocGroup[] {
+  const map = new Map<string, DocGroup>();
+
+  for (const doc of docs) {
+    const minute = doc.created_at.slice(0, 16); // "2026-07-01T10:34"
+    const key = `${doc.metadata?.created_by_input ?? doc.id}__${minute}`;
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.ids.push(doc.id);
+      for (const d of doc.retriever_domain) {
+        if (!existing.retriever_domains.includes(d)) existing.retriever_domains.push(d);
+      }
+    } else {
+      map.set(key, {
+        ids: [doc.id],
+        retriever_domains: [...doc.retriever_domain],
+        titel: doc.metadata?.titel ?? "(Kein Titel)",
+        inputType: doc.metadata?.input_type ?? "freitext",
+        original: doc.metadata?.created_by_input ?? "",
+        status: doc.status,
+        gueltig_bis: doc.gueltig_bis,
+        created_at: doc.created_at,
+      });
+    }
+  }
+
+  return Array.from(map.values());
 }
 
 // ── Delete dialog ────────────────────────────────────────────────────────────
@@ -78,11 +123,11 @@ function DeleteDialog({
 // ── Sidebar entry ────────────────────────────────────────────────────────────
 
 function SidebarEntry({
-  doc,
+  group,
   onDeleted,
 }: {
-  doc: AdminDocument;
-  onDeleted: (id: string) => void;
+  group: DocGroup;
+  onDeleted: (ids: string[]) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -90,19 +135,18 @@ function SidebarEntry({
 
   async function handleDelete() {
     setDeleting(true);
-    const res = await fetch(`/api/admin/documents/${doc.id}`, { method: "DELETE" });
-    if (res.ok) {
-      onDeleted(doc.id);
+    // Delete all rows belonging to this group in parallel.
+    const results = await Promise.all(
+      group.ids.map((id) => fetch(`/api/admin/documents/${id}`, { method: "DELETE" }))
+    );
+    if (results.every((r) => r.ok)) {
+      onDeleted(group.ids);
     } else {
       setDeleting(false);
       setConfirmDelete(false);
       alert("Löschen fehlgeschlagen. Bitte versuche es erneut.");
     }
   }
-
-  const titel = doc.metadata?.titel ?? "(Kein Titel)";
-  const inputType = doc.metadata?.input_type ?? "freitext";
-  const original = doc.metadata?.created_by_input ?? "";
 
   return (
     <div className={styles.entry}>
@@ -115,25 +159,27 @@ function SidebarEntry({
       )}
 
       <div className={styles.entryTop}>
-        <span className={styles.entryTitle}>{titel}</span>
-        <span className={styles.sourceIcon}>{inputType === "url" ? "URL" : "Freitext"}</span>
+        <span className={styles.entryTitle}>{group.titel}</span>
+        <span className={styles.sourceIcon}>
+          {group.inputType === "url" ? "URL" : "Freitext"}
+        </span>
       </div>
 
       <div className={styles.entryMeta}>
-        {doc.retriever_domain.map((d) => (
+        {group.retriever_domains.map((d) => (
           <span key={d} className={styles.chip}>
             {RETRIEVER_ABBREV[d] ?? d}
           </span>
         ))}
-        <StatusBadge status={doc.status} />
+        <StatusBadge status={group.status} />
       </div>
 
-      <div className={styles.entryDate}>{formatGermanDate(doc.created_at)}</div>
+      <div className={styles.entryDate}>{formatGermanDate(group.created_at)}</div>
 
-      {doc.gueltig_bis && (
+      {group.gueltig_bis && (
         <div className={styles.gueltigBis}>
           Gültig bis:{" "}
-          {new Date(doc.gueltig_bis).toLocaleDateString("de-DE", {
+          {new Date(group.gueltig_bis).toLocaleDateString("de-DE", {
             day: "2-digit",
             month: "long",
             year: "numeric",
@@ -145,7 +191,7 @@ function SidebarEntry({
         {expanded ? "Originalinhalt ausblenden" : "Originalinhalt anzeigen"}
       </button>
 
-      {expanded && <div className={styles.originalInput}>{original}</div>}
+      {expanded && <div className={styles.originalInput}>{group.original}</div>}
 
       <button className={styles.deleteBtn} onClick={() => setConfirmDelete(true)}>
         Löschen
@@ -163,13 +209,15 @@ function Sidebar({
 }: {
   docs: AdminDocument[];
   loading: boolean;
-  onDeleted: (id: string) => void;
+  onDeleted: (ids: string[]) => void;
 }) {
+  const groups = groupDocs(docs);
+
   return (
     <div className={styles.sidebar}>
       <div className={styles.sidebarHeader}>
         <span className={styles.sidebarTitle}>Hinzugefügte Inhalte</span>
-        {!loading && <span className={styles.countBadge}>{docs.length}</span>}
+        {!loading && <span className={styles.countBadge}>{groups.length}</span>}
       </div>
       <div className={styles.sidebarList}>
         {loading ? (
@@ -180,11 +228,11 @@ function Sidebar({
               <div className={styles.skeletonLine} style={{ height: 12, width: "30%" }} />
             </div>
           ))
-        ) : docs.length === 0 ? (
+        ) : groups.length === 0 ? (
           <div className={styles.sidebarEmpty}>Noch keine Inhalte hinzugefügt.</div>
         ) : (
-          docs.map((doc) => (
-            <SidebarEntry key={doc.id} doc={doc} onDeleted={onDeleted} />
+          groups.map((group) => (
+            <SidebarEntry key={group.ids[0]} group={group} onDeleted={onDeleted} />
           ))
         )}
       </div>
@@ -591,8 +639,8 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
     fetchDocs();
   }, [fetchDocs]);
 
-  function handleDocDeleted(id: string) {
-    setDocs((prev) => prev.filter((d) => d.id !== id));
+  function handleDocDeleted(ids: string[]) {
+    setDocs((prev) => prev.filter((d) => !ids.includes(d.id)));
   }
 
   async function handleLogout() {
