@@ -47,7 +47,8 @@ Antworte NUR mit JSON, kein Markdown:
         ],
       });
 
-      const raw = msg.content[0].type === "text" ? msg.content[0].text.trim() : "";
+      const rawText = msg.content[0].type === "text" ? msg.content[0].text.trim() : "";
+      const raw = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
       let parsed: { page_content: string; metadata: Record<string, unknown> };
       try {
         parsed = JSON.parse(raw);
