@@ -1,3 +1,16 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body { font-family: system-ui, -apple-system, sans-serif; background: #faf9f7; color: #1a1a1a; }
+
+:root {
+  --admin-yellow: #EADF00;
+  --admin-border: #e5e5e5;
+  --admin-muted: #6b7280;
+  --admin-red: #dc2626;
+  --admin-red-bg: #fef2f2;
+  --admin-green: #16a34a;
+  --admin-green-bg: #f0fdf4;
+  --admin-orange: #d97706;
+  --admin-orange-bg: #fffbeb;
+  --admin-grey-bg: #f3f4f6;
+}
