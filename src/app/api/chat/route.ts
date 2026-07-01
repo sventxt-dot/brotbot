@@ -28,15 +28,6 @@ function getAnthropic() {
 }
 
 export async function POST(req: NextRequest) {
-  // ── Temporary env debug (remove after confirming Coolify env vars arrive) ─
-  const ak = process.env.ANTHROPIC_API_KEY;
-  console.log(
-    "[DEBUG] ANTHROPIC_API_KEY:",
-    ak ? `${ak.slice(0, 8)}...${ak.slice(-4)} (length: ${ak.length})` : "UNDEFINED"
-  );
-  console.log("[DEBUG] ANTHROPIC_MODEL:", process.env.ANTHROPIC_MODEL ?? "UNDEFINED");
-  console.log("[DEBUG] NODE_ENV:", process.env.NODE_ENV ?? "UNDEFINED");
-
   // ── Parse and validate input ────────────────────────────────────────────
   let message: string;
   let session_id: string;
