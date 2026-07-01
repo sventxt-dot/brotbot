@@ -9,14 +9,16 @@
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy init — runtime env vars from Coolify are not yet bound at module load.
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 // Use the anon key here — the chat endpoint only reads active documents.
 // The service role key is used only in the migration script.
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
+function getSupabase() {
+  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+}
 
 export interface RetrievedDoc {
   id: string;
@@ -35,7 +37,7 @@ export async function retrieveContext(
   matchCount = Number(process.env.RAG_MATCH_COUNT ?? 7)
 ): Promise<RetrievedDoc[]> {
   // Embed the query with the same model used during migration
-  const embeddingRes = await openai.embeddings.create({
+  const embeddingRes = await getOpenAI().embeddings.create({
     model: "text-embedding-3-large",
     input: query,
   });
@@ -43,7 +45,7 @@ export async function retrieveContext(
 
   // Call the match_documents() RPC function defined in schema.sql.
   // filter_retrievers is null → search all retrievers simultaneously.
-  const { data, error } = await supabase.rpc("match_documents", {
+  const { data, error } = await getSupabase().rpc("match_documents", {
     query_embedding: queryEmbedding,
     match_count: matchCount,
     filter_retrievers: null,

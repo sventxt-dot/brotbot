@@ -20,7 +20,12 @@ import { retrieveContext, formatContext, type RetrievedDoc } from "@/lib/rag";
 import { getHistory, appendTurn } from "@/lib/session";
 import { buildSystemPrompt } from "@/lib/prompt";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Lazy init so the API key is read at request time, not module load time.
+// (Next.js standalone: runtime env vars from Coolify are not available at
+// module initialization when the const runs during the cold start.)
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 export async function POST(req: NextRequest) {
   // ── Parse and validate input ────────────────────────────────────────────
@@ -86,7 +91,7 @@ export async function POST(req: NextRequest) {
   // ── Call Claude ─────────────────────────────────────────────────────────
   let reply: string;
   try {
-    const response = await anthropic.messages.create({
+    const response = await getAnthropic().messages.create({
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5",
       max_tokens: 1024,
       system: buildSystemPrompt(isFirstTurn),
