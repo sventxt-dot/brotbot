@@ -80,11 +80,13 @@ Antworte NUR mit JSON:
     ],
   });
 
-  const raw = msg.content[0].type === "text" ? msg.content[0].text.trim() : "";
+  const rawText = msg.content[0].type === "text" ? msg.content[0].text.trim() : "";
+  const raw = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   let parsed: { titel: string; zusammenfassung: string; vorgeschlagene_retriever: string[] };
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (parseErr) {
+    console.error("[Admin] analyze-url JSON parse failed:", parseErr, "| raw:", raw);
     return NextResponse.json({ success: false, error: "LLM-Antwort konnte nicht verarbeitet werden." }, { status: 500 });
   }
 

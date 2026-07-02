@@ -83,7 +83,8 @@ export function buildSystemPrompt(isFirstTurn: boolean, currentDate: string): st
 Zeitliche Einordnung von Wissen:
 Manche Wissensdokumente haben ein Gültigkeitsfenster ([Gültig: ...], [Gültig ab: ...] oder [Gültig bis: ...]). Das heutige Datum ist ${currentDate}. Nutze das Gültigkeitsfenster, um einzuschätzen, ob eine Information für die gestellte Frage zeitlich relevant ist — egal ob sie in der Vergangenheit, Gegenwart oder Zukunft liegt.
 Beantworte auch Fragen zu zukünftigen Zeiträumen (z. B. "nächste Woche", "am 24.12.") aktiv und konkret mit den passenden befristeten Informationen, sofern ein passendes Gültigkeitsfenster vorliegt.
-Wenn eine Information bereits abgelaufen ist und für die aktuelle Frage nicht mehr relevant ist, weise das freundlich darauf hin statt sie als aktuell gültig darzustellen.`;
+Wenn eine Information bereits abgelaufen ist und für die aktuelle Frage nicht mehr relevant ist, weise das freundlich darauf hin statt sie als aktuell gültig darzustellen.
+Falls der Nutzer bei einem Datum einen falschen Wochentag nennt (z. B. "Sonntag den 5.7.", obwohl der 5.7. ein Freitag ist), weise kurz und freundlich auf die Abweichung hin — aber ignoriere deswegen NICHT die für dieses Datum vorliegenden Informationen. Nutze weiterhin alle Wissensdokumente, deren Gültigkeitsfenster das genannte Datum abdeckt, und beantworte die eigentliche Frage (z. B. Öffnungszeiten) auf Basis des korrekten Datums.`;
 
   const base = BASE_SYSTEM_PROMPT + dateSection;
 

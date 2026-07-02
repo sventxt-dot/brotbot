@@ -1,6 +1,72 @@
 "use client";
 
 import { useState, useRef, useEffect, useId } from "react";
+
+// Regex covering German phone number formats:
+//   08051 1234, 08051/1234, +49 8051 1234, 0800 123 4567, etc.
+const PHONE_RE =
+  /(\+49[\s\-./]?|0)(\d[\d\s\-./]{5,14}\d)/g;
+
+function normalizePhone(raw: string): string {
+  // Strip spaces, dashes, dots, slashes → keep digits and leading +
+  return raw.replace(/[\s\-./]/g, "");
+}
+
+/**
+ * Convert plain-text bot reply into safe HTML:
+ *  - **bold** → <strong>
+ *  - *italic* → <em>
+ *  - newlines → <br>
+ *  - German phone numbers → <a href="tel:...">
+ * No markdown library needed; no dangerouslySetInnerHTML on user content.
+ */
+function renderBotContent(text: string): React.ReactNode {
+  // Split on phone number matches to interleave links
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  PHONE_RE.lastIndex = 0;
+
+  while ((m = PHONE_RE.exec(text)) !== null) {
+    if (m.index > last) parts.push(renderInline(text.slice(last, m.index)));
+    const digits = normalizePhone(m[0]);
+    const href = digits.startsWith("+") ? `tel:${digits}` : `tel:+49${digits.slice(1)}`;
+    parts.push(
+      <a key={m.index} href={href} style={{ color: "inherit", textDecoration: "underline" }}>
+        {m[0]}
+      </a>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(renderInline(text.slice(last)));
+  return <>{parts}</>;
+}
+
+/** Handle **bold**, *italic*, and \n→<br> within a text segment. */
+function renderInline(text: string): React.ReactNode {
+  // Split on newlines first, then apply bold/italic per line segment
+  const lines = text.split("\n");
+  return lines.map((line, li) => {
+    const segments: React.ReactNode[] = [];
+    // Match **bold** or *italic*
+    const re = /(\*\*(.+?)\*\*|\*(.+?)\*)/g;
+    let pos = 0;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(line)) !== null) {
+      if (match.index > pos) segments.push(line.slice(pos, match.index));
+      if (match[0].startsWith("**")) segments.push(<strong key={match.index}>{match[2]}</strong>);
+      else segments.push(<em key={match.index}>{match[3]}</em>);
+      pos = match.index + match[0].length;
+    }
+    if (pos < line.length) segments.push(line.slice(pos));
+    return (
+      <span key={li}>
+        {segments}
+        {li < lines.length - 1 && <br />}
+      </span>
+    );
+  });
+}
 import styles from "./chat.module.css";
 
 interface Message {
@@ -108,7 +174,7 @@ export default function ChatPage() {
             key={i}
             className={`${styles.bubble} ${msg.role === "user" ? styles.bubbleUser : styles.bubbleBot}`}
           >
-            {msg.content}
+            {msg.role === "assistant" ? renderBotContent(msg.content) : msg.content}
           </div>
         ))}
 

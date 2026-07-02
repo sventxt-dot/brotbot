@@ -66,11 +66,13 @@ alter table documents enable row level security;
 -- any future admin writes). No explicit policy needed for service role.
 
 -- Anon key (used by the chat frontend via /api/chat):
--- read-only access to active documents only.
-create policy "anon read aktiv"
+-- read-only access to aktiv + geplant documents.
+-- 'abgelaufen' is excluded. Temporal relevance for 'geplant' docs is
+-- handled by the LLM via [Gültig: ...] prefixes in the context block.
+create policy "anon read aktiv und geplant"
   on documents for select
   to anon
-  using (status = 'aktiv');
+  using (status in ('aktiv', 'geplant'));
 
 -- ---------------------------------------------------------------
 -- 5. updated_at trigger
