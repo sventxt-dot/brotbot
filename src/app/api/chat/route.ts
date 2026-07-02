@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     const response = await getAnthropic().messages.create({
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5",
       max_tokens: 1024,
-      system: buildSystemPrompt(isFirstTurn),
+      system: buildSystemPrompt(isFirstTurn, new Date().toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })),
       messages: [
         ...historyMessages,
         { role: "user", content: userContent },

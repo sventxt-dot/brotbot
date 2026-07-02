@@ -92,9 +92,15 @@ create or replace trigger documents_updated_at
 --
 --    Returns top-k documents by cosine similarity, optionally
 --    filtered to one or more retriever domains.
---    Includes status='aktiv' and status='geplant' — future events are
---    visible to the bot so it can answer questions about upcoming dates.
---    Only status='abgelaufen' (expired) is excluded.
+--
+--    No status filter — all documents are retrievable regardless of
+--    aktiv/geplant/abgelaufen. The status and validity window
+--    (gueltig_von / gueltig_bis) are returned as explicit columns so
+--    the chat route can inject them into the LLM context as plain text.
+--    The LLM then reasons about temporal relevance itself.
+--
+--    True removal is handled by hard-deleting rows, not by status.
+--
 --    Called from the backend via supabase.rpc('match_documents', …)
 -- ---------------------------------------------------------------
 create or replace function match_documents(
@@ -107,6 +113,9 @@ returns table (
   retriever_domain text[],
   page_content     text,
   metadata         jsonb,
+  status           text,
+  gueltig_von      date,
+  gueltig_bis      date,
   similarity       float
 )
 language sql stable as $$
@@ -115,14 +124,14 @@ language sql stable as $$
     d.retriever_domain,
     d.page_content,
     d.metadata,
+    d.status,
+    d.gueltig_von,
+    d.gueltig_bis,
     1 - (d.embedding <=> query_embedding) as similarity
   from documents d
   where
-    d.status in ('aktiv', 'geplant')
-    and (
-      filter_retrievers is null
-      or d.retriever_domain && filter_retrievers  -- array overlap
-    )
+    filter_retrievers is null
+    or d.retriever_domain && filter_retrievers  -- array overlap
   order by d.embedding <=> query_embedding
   limit match_count;
 $$;

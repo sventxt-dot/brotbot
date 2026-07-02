@@ -72,13 +72,24 @@ Der Sekretär zögert, greift dann zum Haustelefon und ruft den Papst an: "Chef,
 
 /**
  * Build the final system prompt for a given turn.
- * On the first turn of a session (no prior history), the model is instructed
- * to open with "Servus" — exactly once per session.
+ * @param isFirstTurn  True when the session has no prior history — instructs
+ *                     the model to open with "Servus" exactly once.
+ * @param currentDate  Today's date in German format ("02.07.2026"), injected
+ *                     so the model can reason about [Gültig: ...] windows.
  */
-export function buildSystemPrompt(isFirstTurn: boolean): string {
-  if (!isFirstTurn) return BASE_SYSTEM_PROMPT;
+export function buildSystemPrompt(isFirstTurn: boolean, currentDate: string): string {
+  const dateSection = `
+
+Zeitliche Einordnung von Wissen:
+Manche Wissensdokumente haben ein Gültigkeitsfenster ([Gültig: ...], [Gültig ab: ...] oder [Gültig bis: ...]). Das heutige Datum ist ${currentDate}. Nutze das Gültigkeitsfenster, um einzuschätzen, ob eine Information für die gestellte Frage zeitlich relevant ist — egal ob sie in der Vergangenheit, Gegenwart oder Zukunft liegt.
+Beantworte auch Fragen zu zukünftigen Zeiträumen (z. B. "nächste Woche", "am 24.12.") aktiv und konkret mit den passenden befristeten Informationen, sofern ein passendes Gültigkeitsfenster vorliegt.
+Wenn eine Information bereits abgelaufen ist und für die aktuelle Frage nicht mehr relevant ist, weise das freundlich darauf hin statt sie als aktuell gültig darzustellen.`;
+
+  const base = BASE_SYSTEM_PROMPT + dateSection;
+
+  if (!isFirstTurn) return base;
   return (
-    BASE_SYSTEM_PROMPT +
+    base +
     "\n\n" +
     "Beginne diese erste Antwort mit einem freundlichen \"Servus\". " +
     "Nur diese erste Antwort — danach nicht mehr."

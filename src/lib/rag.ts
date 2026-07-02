@@ -25,6 +25,9 @@ export interface RetrievedDoc {
   retriever_domain: string[];
   page_content: string;
   metadata: Record<string, unknown>;
+  status: string;
+  gueltig_von: string | null;
+  gueltig_bis: string | null;
   similarity: number;
 }
 
@@ -58,10 +61,27 @@ export async function retrieveContext(
   return (data ?? []) as RetrievedDoc[];
 }
 
+// Format a Supabase date string ("2026-12-24") as German "24.12.2026".
+function formatDateDE(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+// Build the [Gültig: ...] prefix for documents that have a validity window.
+function validityPrefix(doc: RetrievedDoc): string {
+  const von = doc.gueltig_von;
+  const bis = doc.gueltig_bis;
+  if (von && bis) return `[Gültig: ${formatDateDE(von)} – ${formatDateDE(bis)}] `;
+  if (von) return `[Gültig ab: ${formatDateDE(von)}] `;
+  if (bis) return `[Gültig bis: ${formatDateDE(bis)}] `;
+  return "";
+}
+
 /**
  * Format retrieved documents into a context block for the Claude prompt.
- * Returns a compact German-readable string; source metadata is preserved
- * but not shown to the user (it stays in the API response for debugging).
+ * Validity windows are prepended as [Gültig: ...] so the LLM can reason
+ * about temporal relevance. Source metadata stays in the API response for
+ * debugging but is not shown to the user.
  */
 export function formatContext(docs: RetrievedDoc[]): string {
   if (docs.length === 0) return "";
@@ -69,7 +89,8 @@ export function formatContext(docs: RetrievedDoc[]): string {
     .map((doc, i) => {
       const titel = doc.metadata.titel ?? "";
       const domain = doc.retriever_domain.join(", ");
-      return `[${i + 1}] (${domain}${titel ? ` — ${titel}` : ""})\n${doc.page_content}`;
+      const prefix = validityPrefix(doc);
+      return `[${i + 1}] (${domain}${titel ? ` — ${titel}` : ""})\n${prefix}${doc.page_content}`;
     })
     .join("\n\n---\n\n");
 }
