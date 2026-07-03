@@ -5,6 +5,18 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function middleware(request: NextRequest) {
+  // If the request arrives on the admin subdomain but without an /admin prefix,
+  // rewrite transparently so /  →  /admin, /login → /admin/login, etc.
+  const hostname = request.headers.get("host") ?? "";
+  if (hostname.startsWith("admin.")) {
+    const path = request.nextUrl.pathname;
+    if (!path.startsWith("/admin")) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/admin" + (path === "/" ? "" : path);
+      return NextResponse.rewrite(url);
+    }
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -49,5 +61,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  // /admin/:path* — protect admin routes
+  // / and /(.*) — catch root and all paths so the admin-subdomain rewrite runs
+  matcher: ["/admin/:path*", "/", "/((?!_next|favicon.ico|.*\\..*).*)"],
 };
