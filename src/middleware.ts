@@ -45,6 +45,11 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
+  // API routes handle their own auth — never redirect them.
+  if (path.startsWith("/api/")) {
+    return supabaseResponse;
+  }
+
   // Public admin routes — no auth required.
   if (path.startsWith("/admin/login") || path.startsWith("/admin/auth")) {
     return supabaseResponse;
@@ -61,7 +66,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // /admin/:path* — protect admin routes
-  // / and /(.*) — catch root and all paths so the admin-subdomain rewrite runs
-  matcher: ["/admin/:path*", "/", "/((?!_next|favicon.ico|.*\\..*).*)"],
+  // Covers /admin/* for auth protection, and / + all non-asset, non-API paths
+  // for the admin-subdomain hostname rewrite. Excludes _next, static files, and /api/*.
+  matcher: ["/admin/:path*", "/", "/((?!_next|favicon\\.ico|api/|.*\\..*).*)"],
 };
