@@ -5,18 +5,33 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function middleware(request: NextRequest) {
-  // If the request arrives on the admin subdomain but without an /admin prefix,
-  // rewrite transparently so /  →  /admin, /login → /admin/login, etc.
   const hostname = request.headers.get("host") ?? "";
-  if (hostname.startsWith("admin.")) {
-    const path = request.nextUrl.pathname;
-    if (!path.startsWith("/admin")) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/admin" + (path === "/" ? "" : path);
-      return NextResponse.rewrite(url);
-    }
+  const path = request.nextUrl.pathname;
+  const isAdminSubdomain = hostname.startsWith("admin.");
+
+  // ── Admin-subdomain rewrite ──────────────────────────────────────────────
+  // Requests arriving on admin.* without /admin prefix get rewritten:
+  //   admin.example.com/        → serves /admin
+  //   admin.example.com/login   → serves /admin/login
+  if (isAdminSubdomain && !path.startsWith("/admin")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/admin" + (path === "/" ? "" : path);
+    return NextResponse.rewrite(url);
   }
 
+  // ── Block /admin/* on the public domain ─────────────────────────────────
+  // Any request to /admin/* that is NOT on the admin subdomain returns 404.
+  // This prevents the admin UI from being reachable at brotbot.bot-boutique.com/admin/*.
+  if (path.startsWith("/admin") && !isAdminSubdomain) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  // ── API routes: skip auth guard, handled by each route handler ───────────
+  if (path.startsWith("/api/")) {
+    return NextResponse.next({ request });
+  }
+
+  // ── Supabase session refresh + admin auth guard ──────────────────────────
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -38,25 +53,17 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session — required for @supabase/ssr to keep tokens alive.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const path = request.nextUrl.pathname;
-
-  // API routes handle their own auth — never redirect them.
-  if (path.startsWith("/api/")) {
-    return supabaseResponse;
-  }
-
-  // Public admin routes — no auth required.
+  // /admin/login and /admin/auth/callback are publicly accessible on admin subdomain.
   if (path.startsWith("/admin/login") || path.startsWith("/admin/auth")) {
     return supabaseResponse;
   }
 
   // All other /admin/* routes require a valid session.
-  if (!user) {
+  if (path.startsWith("/admin") && !user) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/admin/login";
     return NextResponse.redirect(loginUrl);
