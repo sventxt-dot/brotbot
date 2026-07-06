@@ -94,7 +94,13 @@ export async function POST(req: NextRequest) {
     const response = await getAnthropic().messages.create({
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5",
       max_tokens: 1024,
-      system: buildSystemPrompt(isFirstTurn, new Date().toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })),
+      system: buildSystemPrompt(isFirstTurn, (() => {
+        const now = new Date();
+        const tz = { timeZone: "Europe/Berlin" } as const;
+        const currentDate = now.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", ...tz });
+        const currentWeekday = now.toLocaleDateString("de-DE", { weekday: "long", ...tz });
+        return { currentDate, currentWeekday };
+      })()),
       messages: [
         ...historyMessages,
         { role: "user", content: userContent },

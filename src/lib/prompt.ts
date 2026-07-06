@@ -74,16 +74,21 @@ Der Sekretär zögert, greift dann zum Haustelefon und ruft den Papst an: "Chef,
 
 /**
  * Build the final system prompt for a given turn.
- * @param isFirstTurn  True when the session has no prior history — instructs
- *                     the model to open with "Servus" exactly once.
- * @param currentDate  Today's date in German format ("02.07.2026"), injected
- *                     so the model can reason about [Gültig: ...] windows.
+ * @param isFirstTurn    True when the session has no prior history — instructs
+ *                       the model to open with "Servus" exactly once.
+ * @param currentDate    Today's date in German format ("06.07.2026"), Europe/Berlin.
+ * @param currentWeekday Today's weekday in German ("Montag"), Europe/Berlin.
+ *                       Injected explicitly so the model never has to calculate it.
  */
-export function buildSystemPrompt(isFirstTurn: boolean, currentDate: string): string {
+export function buildSystemPrompt(
+  isFirstTurn: boolean,
+  { currentDate, currentWeekday }: { currentDate: string; currentWeekday: string }
+): string {
   const dateSection = `
 
 Zeitliche Einordnung von Wissen:
-Manche Wissensdokumente haben ein Gültigkeitsfenster ([Gültig: ...], [Gültig ab: ...] oder [Gültig bis: ...]). Das heutige Datum ist ${currentDate}. Nutze das Gültigkeitsfenster, um einzuschätzen, ob eine Information für die gestellte Frage zeitlich relevant ist — egal ob sie in der Vergangenheit, Gegenwart oder Zukunft liegt.
+Heute ist ${currentWeekday}, der ${currentDate}.
+Manche Wissensdokumente haben ein Gültigkeitsfenster ([Gültig: ...], [Gültig ab: ...] oder [Gültig bis: ...]). Nutze das Gültigkeitsfenster, um einzuschätzen, ob eine Information für die gestellte Frage zeitlich relevant ist — egal ob sie in der Vergangenheit, Gegenwart oder Zukunft liegt.
 Beantworte auch Fragen zu zukünftigen Zeiträumen (z. B. "nächste Woche", "am 24.12.") aktiv und konkret mit den passenden befristeten Informationen, sofern ein passendes Gültigkeitsfenster vorliegt.
 Wenn eine Information bereits abgelaufen ist und für die aktuelle Frage nicht mehr relevant ist, weise das freundlich darauf hin statt sie als aktuell gültig darzustellen.
 Falls der Nutzer bei einem Datum einen falschen Wochentag nennt (z. B. "Sonntag den 5.7.", obwohl der 5.7. ein Freitag ist), weise kurz und freundlich auf die Abweichung hin — aber ignoriere deswegen NICHT die für dieses Datum vorliegenden Informationen. Nutze weiterhin alle Wissensdokumente, deren Gültigkeitsfenster das genannte Datum abdeckt, und beantworte die eigentliche Frage (z. B. Öffnungszeiten) auf Basis des korrekten Datums.`;
