@@ -64,11 +64,12 @@ export const RETRIEVER_ABBREV: Record<string, string> = {
 
 export interface AdminDocument {
   id: string;
+  page_content: string;
   retriever_domain: string[];
   metadata: {
     titel?: string;
     source_type: "admin_input";
-    input_type: "freitext" | "url";
+    input_type: "freitext" | "url" | "pdf";
     created_by_input: string;
     [key: string]: unknown;
   };

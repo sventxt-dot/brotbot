@@ -690,3 +690,9 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.editFormActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}

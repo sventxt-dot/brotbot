@@ -49,6 +49,7 @@ interface DocGroup {
   titel: string;
   inputType: string;
   original: string; // created_by_input (freitext text or URL)
+  page_content: string; // normalized/embedded text of the first row
   status: string;
   gueltig_von: string | null;
   gueltig_bis: string | null;
@@ -75,6 +76,7 @@ function groupDocs(docs: AdminDocument[]): DocGroup[] {
         titel: doc.metadata?.titel ?? "(Kein Titel)",
         inputType: doc.metadata?.input_type ?? "freitext",
         original: doc.metadata?.created_by_input ?? "",
+        page_content: doc.page_content ?? "",
         status: doc.status,
         gueltig_von: doc.gueltig_von,
         gueltig_bis: doc.gueltig_bis,
@@ -364,6 +366,146 @@ function ValiditySection({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Edit form (shown instead of tabs when editing any entry type) ─────────────
+
+function EditForm({
+  editingGroup,
+  onCancelEdit,
+  onEditDone,
+}: {
+  editingGroup: DocGroup;
+  onCancelEdit: () => void;
+  onEditDone: (ids: string[]) => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+  const [titel, setTitel] = useState(editingGroup.titel);
+  const [content, setContent] = useState(editingGroup.page_content);
+  const [domains, setDomains] = useState<string[]>(editingGroup.retriever_domains);
+  const [limited, setLimited] = useState(!!editingGroup.gueltig_bis);
+  const [gueltigVon, setGueltigVon] = useState(editingGroup.gueltig_von ?? today);
+  const [gueltigBis, setGueltigBis] = useState(editingGroup.gueltig_bis ?? "");
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    if (!content.trim()) { setError("Der Inhalt darf nicht leer sein."); return; }
+    if (domains.length === 0) { setError("Bitte mindestens einen Bereich auswählen."); return; }
+    if (limited && !gueltigBis) { setError("Bitte ein Enddatum angeben."); return; }
+
+    setLoading(true);
+    setError("");
+
+    // Delete old rows first.
+    const deleted = await deleteGroupRows(editingGroup.ids);
+    if (!deleted) {
+      setError("Alte Einträge konnten nicht gelöscht werden.");
+      setLoading(false);
+      return;
+    }
+
+    // Ingest edited content directly (no LLM normalization — user controls text).
+    const res = await fetch("/api/admin/ingest-direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_content: content.trim(),
+        titel: titel.trim() || content.trim().slice(0, 80),
+        retriever_domains: domains,
+        gueltig_von: limited ? gueltigVon || null : null,
+        gueltig_bis: limited ? gueltigBis || null : null,
+        original_source: editingGroup.original || content.trim(),
+        input_type: editingGroup.inputType,
+      }),
+    });
+
+    const data = await res.json();
+    setLoading(false);
+
+    if (data.success) {
+      onEditDone(editingGroup.ids);
+    } else {
+      setError(data.error ?? "Unbekannter Fehler.");
+    }
+  }
+
+  return (
+    <div className={styles.formBody}>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="edit-titel">
+          Titel
+        </label>
+        <input
+          id="edit-titel"
+          type="text"
+          className={styles.input}
+          value={titel}
+          onChange={(e) => setTitel(e.target.value)}
+          placeholder="Kurzer, beschreibender Titel"
+        />
+      </div>
+
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="edit-content">
+          Inhalt
+        </label>
+        <textarea
+          id="edit-content"
+          className={styles.textarea}
+          rows={7}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+        />
+        <div className={styles.charCount}>{content.length} Zeichen</div>
+      </div>
+
+      <div className={styles.field}>
+        <span className={styles.label}>Zu welchem Bereich gehört diese Information?</span>
+        <div className={styles.hint}>Mehrfachauswahl möglich – wähle alle passenden Bereiche.</div>
+        <RetrieverCheckboxes selected={domains} onChange={setDomains} />
+      </div>
+
+      <ValiditySection
+        limited={limited}
+        setLimited={setLimited}
+        gueltigVon={gueltigVon}
+        setGueltigVon={setGueltigVon}
+        gueltigBis={gueltigBis}
+        setGueltigBis={setGueltigBis}
+      />
+
+      {editingGroup.original && (
+        <div className={styles.field}>
+          <button
+            className={styles.expandBtn}
+            onClick={() => setShowOriginal((v) => !v)}
+          >
+            {showOriginal ? "Originalinhalt ausblenden" : "Originalinhalt anzeigen"}
+          </button>
+          {showOriginal && (
+            <div className={styles.originalInput}>{editingGroup.original}</div>
+          )}
+        </div>
+      )}
+
+      {error && <div className={styles.errorMsg}>{error}</div>}
+
+      <div className={styles.editFormActions}>
+        <button className={styles.cancelBtn} onClick={onCancelEdit} disabled={loading}>
+          Abbrechen
+        </button>
+        <button
+          className={styles.submitBtn}
+          onClick={handleSave}
+          disabled={loading || !content.trim() || domains.length === 0}
+        >
+          {loading ? "Wird gespeichert ..." : "Änderungen speichern"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -924,11 +1066,9 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
 
   useEffect(() => { fetchDocs(); }, [fetchDocs]);
 
-  // When edit mode starts: switch to the right tab and scroll form into view.
+  // When edit mode starts: scroll the form panel into view.
   useEffect(() => {
     if (editingGroup) {
-      const t = editingGroup.inputType === "url" ? "url" : editingGroup.inputType === "pdf" ? "pdf" : "freitext";
-      setTab(t);
       formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [editingGroup]);
@@ -992,46 +1132,53 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
             </div>
           )}
 
-          <div className={styles.tabs}>
-            <button
-              className={`${styles.tab} ${tab === "freitext" ? styles.tabActive : ""}`}
-              onClick={() => setTab("freitext")}
-              disabled={!!editingGroup}
-            >
-              Freitext
-            </button>
-            <button
-              className={`${styles.tab} ${tab === "url" ? styles.tabActive : ""}`}
-              onClick={() => setTab("url")}
-              disabled={!!editingGroup}
-            >
-              URL
-            </button>
-            <button
-              className={`${styles.tab} ${tab === "pdf" ? styles.tabActive : ""}`}
-              onClick={() => setTab("pdf")}
-              disabled={!!editingGroup}
-            >
-              PDF
-            </button>
-          </div>
-
-          {tab === "freitext" ? (
-            <FreitextTab
-              editingGroup={editingGroup?.inputType === "freitext" ? editingGroup : null}
+          {editingGroup ? (
+            <EditForm
+              editingGroup={editingGroup}
               onCancelEdit={handleCancelEdit}
-              onSuccess={fetchDocs}
-              onEditDone={handleEditDone}
-            />
-          ) : tab === "url" ? (
-            <UrlTab
-              editingGroup={editingGroup?.inputType === "url" ? editingGroup : null}
-              onCancelEdit={handleCancelEdit}
-              onSuccess={fetchDocs}
               onEditDone={handleEditDone}
             />
           ) : (
-            <PdfTab onSuccess={fetchDocs} />
+            <>
+              <div className={styles.tabs}>
+                <button
+                  className={`${styles.tab} ${tab === "freitext" ? styles.tabActive : ""}`}
+                  onClick={() => setTab("freitext")}
+                >
+                  Freitext
+                </button>
+                <button
+                  className={`${styles.tab} ${tab === "url" ? styles.tabActive : ""}`}
+                  onClick={() => setTab("url")}
+                >
+                  URL
+                </button>
+                <button
+                  className={`${styles.tab} ${tab === "pdf" ? styles.tabActive : ""}`}
+                  onClick={() => setTab("pdf")}
+                >
+                  PDF
+                </button>
+              </div>
+
+              {tab === "freitext" ? (
+                <FreitextTab
+                  editingGroup={null}
+                  onCancelEdit={handleCancelEdit}
+                  onSuccess={fetchDocs}
+                  onEditDone={handleEditDone}
+                />
+              ) : tab === "url" ? (
+                <UrlTab
+                  editingGroup={null}
+                  onCancelEdit={handleCancelEdit}
+                  onSuccess={fetchDocs}
+                  onEditDone={handleEditDone}
+                />
+              ) : (
+                <PdfTab onSuccess={fetchDocs} />
+              )}
+            </>
           )}
         </div>
 
