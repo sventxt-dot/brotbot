@@ -168,7 +168,7 @@ function SidebarEntry({
       <div className={styles.entryTop}>
         <span className={styles.entryTitle}>{group.titel}</span>
         <span className={styles.sourceIcon}>
-          {group.inputType === "url" ? "URL" : "Freitext"}
+          {group.inputType === "url" ? "URL" : group.inputType === "pdf" ? "PDF" : "Freitext"}
         </span>
       </div>
 
@@ -741,11 +741,172 @@ function UrlTab({
   );
 }
 
+// ── PDF tab ───────────────────────────────────────────────────────────────────
+
+function PdfTab({
+  onSuccess,
+}: {
+  onSuccess: () => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+  const [file, setFile] = useState<File | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult & { filename: string } | null>(null);
+  const [analyzeError, setAnalyzeError] = useState("");
+  const [domains, setDomains] = useState<string[]>([]);
+  const [limited, setLimited] = useState(false);
+  const [gueltigVon, setGueltigVon] = useState(today);
+  const [gueltigBis, setGueltigBis] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [submitError, setSubmitError] = useState("");
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    setAnalysis(null);
+    setAnalyzeError("");
+    setSuccess("");
+    setSubmitError("");
+  }
+
+  async function handleAnalyze() {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setAnalyzeError("Die Datei ist zu groß. Maximale Dateigröße: 10 MB.");
+      return;
+    }
+    setAnalyzing(true);
+    setAnalyzeError("");
+    setAnalysis(null);
+
+    const form = new FormData();
+    form.append("file", file);
+
+    const res = await fetch("/api/admin/analyze-pdf", { method: "POST", body: form });
+    const data = await res.json();
+    setAnalyzing(false);
+
+    if (data.success) {
+      setAnalysis(data);
+      setDomains(data.vorgeschlagene_retriever ?? []);
+    } else {
+      setAnalyzeError(data.error ?? "Das PDF konnte nicht verarbeitet werden.");
+    }
+  }
+
+  async function handleSubmit() {
+    if (!analysis) return;
+    if (domains.length === 0) { setSubmitError("Bitte mindestens einen Bereich auswählen."); return; }
+    if (limited && !gueltigBis) { setSubmitError("Bitte ein Enddatum angeben."); return; }
+
+    setLoading(true);
+    setSubmitError("");
+    setSuccess("");
+
+    const res = await fetch("/api/admin/ingest-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: analysis.filename,
+        extracted_text: analysis.extracted_text,
+        retriever_domains: domains,
+        gueltig_von: limited ? gueltigVon || null : null,
+        gueltig_bis: limited ? gueltigBis || null : null,
+      }),
+    });
+
+    const data = await res.json();
+    setLoading(false);
+
+    if (data.success) {
+      setSuccess(`${data.inserted} Eintrag${data.inserted !== 1 ? "e" : ""} erfolgreich hinzugefügt.`);
+      setFile(null);
+      setAnalysis(null);
+      setDomains([]);
+      setLimited(false);
+      setGueltigBis("");
+      onSuccess();
+    } else {
+      setSubmitError(data.error ?? "Unbekannter Fehler.");
+    }
+  }
+
+  return (
+    <div className={styles.formBody}>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="pdf-input">
+          PDF-Datei auswählen
+        </label>
+        <input
+          id="pdf-input"
+          type="file"
+          accept=".pdf,application/pdf"
+          className={styles.input}
+          onChange={handleFileChange}
+        />
+        <div className={styles.hint}>
+          Nur textbasierte PDFs (z. B. aus Word/Excel exportiert). Gescannte Dokumente ohne Textebene werden nicht unterstützt.
+        </div>
+      </div>
+
+      <button
+        className={styles.analyzeBtn}
+        onClick={handleAnalyze}
+        disabled={analyzing || !file}
+      >
+        {analyzing ? "PDF wird gelesen ..." : "PDF analysieren"}
+      </button>
+
+      {analyzeError && <div className={styles.errorMsg}>{analyzeError}</div>}
+
+      {analysis && (
+        <>
+          <div className={styles.analysisResult}>
+            <div className={styles.analysisTitle}>{analysis.titel}</div>
+            <div className={styles.analysisSummary}>{analysis.zusammenfassung}</div>
+          </div>
+
+          <div className={styles.field}>
+            <span className={styles.label}>Zu welchem Bereich gehört diese Information?</span>
+            <div className={styles.hint}>
+              Der BrotBot hat folgende Bereiche vorgeschlagen. Du kannst die Auswahl anpassen.
+            </div>
+            <RetrieverCheckboxes selected={domains} onChange={setDomains} />
+          </div>
+
+          <ValiditySection
+            limited={limited}
+            setLimited={setLimited}
+            gueltigVon={gueltigVon}
+            setGueltigVon={setGueltigVon}
+            gueltigBis={gueltigBis}
+            setGueltigBis={setGueltigBis}
+          />
+
+          {submitError && <div className={styles.errorMsg}>{submitError}</div>}
+          {success && <div className={styles.successMsg}>{success}</div>}
+
+          <button
+            className={styles.submitBtn}
+            onClick={handleSubmit}
+            disabled={loading || domains.length === 0}
+          >
+            {loading ? "Wird verarbeitet ..." : "Inhalt hinzufügen"}
+          </button>
+        </>
+      )}
+
+      {success && !analysis && <div className={styles.successMsg}>{success}</div>}
+    </div>
+  );
+}
+
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 export default function AdminDashboard({ userEmail }: { userEmail: string }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"freitext" | "url">("freitext");
+  const [tab, setTab] = useState<"freitext" | "url" | "pdf">("freitext");
   const [docs, setDocs] = useState<AdminDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [editingGroup, setEditingGroup] = useState<DocGroup | null>(null);
@@ -766,7 +927,8 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
   // When edit mode starts: switch to the right tab and scroll form into view.
   useEffect(() => {
     if (editingGroup) {
-      setTab(editingGroup.inputType === "url" ? "url" : "freitext");
+      const t = editingGroup.inputType === "url" ? "url" : editingGroup.inputType === "pdf" ? "pdf" : "freitext";
+      setTab(t);
       formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [editingGroup]);
@@ -845,6 +1007,13 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
             >
               URL
             </button>
+            <button
+              className={`${styles.tab} ${tab === "pdf" ? styles.tabActive : ""}`}
+              onClick={() => setTab("pdf")}
+              disabled={!!editingGroup}
+            >
+              PDF
+            </button>
           </div>
 
           {tab === "freitext" ? (
@@ -854,13 +1023,15 @@ export default function AdminDashboard({ userEmail }: { userEmail: string }) {
               onSuccess={fetchDocs}
               onEditDone={handleEditDone}
             />
-          ) : (
+          ) : tab === "url" ? (
             <UrlTab
               editingGroup={editingGroup?.inputType === "url" ? editingGroup : null}
               onCancelEdit={handleCancelEdit}
               onSuccess={fetchDocs}
               onEditDone={handleEditDone}
             />
+          ) : (
+            <PdfTab onSuccess={fetchDocs} />
           )}
         </div>
 
