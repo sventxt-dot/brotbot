@@ -50,6 +50,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # public/ assets (logo, etc.) — empty for now but keeps the pattern correct
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# pdf-parse is a serverExternalPackage (not bundled by webpack) so Next.js
+# standalone does not auto-include it. Copy it explicitly so require("pdf-parse")
+# resolves at runtime inside the container.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/pdf-parse ./node_modules/pdf-parse
+
 USER nextjs
 
 EXPOSE 3000
