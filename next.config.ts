@@ -6,8 +6,10 @@ const nextConfig: NextConfig = {
   // in the final image, much smaller container.
   output: "standalone",
 
-  // Raw data files in data/raw/ are never served — only public/ (lowercase)
-  // is shipped. Next.js ignores everything outside public/ automatically.
+  // pdf-parse v1 uses fs.readFileSync for test fixtures at require() time,
+  // which breaks when webpack bundles it. Marking it external forces Next.js
+  // to require() it at runtime from node_modules instead of bundling it.
+  serverExternalPackages: ["pdf-parse"],
 };
 
 export default nextConfig;
